@@ -69,7 +69,7 @@ done
 emptyQueueTimeout=$((emptyQueueTimeout * 2))
 
 case $cmd in
-    worker|push|worker-screen)
+    worker|push|worker-screen|spawn-workers)
         if [ -z "${queue}" ]
         then
             echo "Queue name not specified."
@@ -136,7 +136,7 @@ case $cmd in
         if [[ $shutdown == true ]]; then
             ${q} wait-shutdown-screen
         fi
-        
+
         ;;
         
     wait-shutdown-screen)
