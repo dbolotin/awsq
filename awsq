@@ -104,7 +104,7 @@ function push {
         exit 1
     fi
 
-    resp=$(aws sqs send-message --queue-url ${queueURL} --region ${region} --message-body "$msg")
+    resp=$(aws sqs send-message --queue-url ${queueURL} --region ${region} --message-body "Q $msg")
 
     if [[ "$?" != "0" ]]
     then
@@ -194,6 +194,8 @@ case $cmd in
             attempt=0
             body="$(echo ${content} | jq -r '.Messages[0].Body')"
 
+            body=$(echo ${body} | sed 's/^Q //')
+            
             echo ${body}
 
             # Converting input message to array
@@ -244,9 +246,10 @@ case $cmd in
             aws s3 cp ${taskFile} ${fileName}
         elif [[ "${taskFile}" == "http://"* ]] || [[ "${taskFile}" == "https://"* ]]; then
             curl ${taskFile} > ${fileName}
+            chmod +x ${fileName}
         fi
 
-        if [[ ${fileName} == *.zip ]]; then
+        if [[ ${fileName} == *".zip" ]]; then
             unzip ${fileName}
             rm ${fileName}
         fi
