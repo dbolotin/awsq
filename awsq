@@ -24,6 +24,7 @@ type jq >/dev/null 2>&1 || { echo >&2 "Please install \"jq\". Try \"brew install
 type aws >/dev/null 2>&1 || { echo >&2 "Please install \"aws cli\". Try \"pip install awscli\"." ; exit 1; }
 
 queue=''
+shutdown=false
 region='us-east-1'
 emptyQueueTimeout=10
 
@@ -43,6 +44,10 @@ do
         ;;
         --region)
             region='${1}'
+            shift
+        ;;
+        --shutdown-after-work)
+            shutdown=true
             shift
         ;;
         --emptyTimeout)
@@ -127,7 +132,11 @@ case $cmd in
         do
             ${q} worker-screen --queue ${queue} "${workingDirectoryPrefix}${i}"
         done
-        ${q} wait-shutdown-screen
+
+        if [[ $shutdown == true ]]; then
+            ${q} wait-shutdown-screen
+        fi
+        
         ;;
         
     wait-shutdown-screen)
@@ -195,7 +204,7 @@ case $cmd in
             body="$(echo ${content} | jq -r '.Messages[0].Body')"
 
             body=$(echo ${body} | sed 's/^Q //')
-            
+
             echo ${body}
 
             # Converting input message to array

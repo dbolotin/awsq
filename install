@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Important (!) requires "jq" and "awscli" to be installed
+
 # Run: 
 # curl https://raw.githubusercontent.com/dbolotin/awsq/master/install 2> /dev/null | sh
 
