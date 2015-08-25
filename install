@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Run: 
+# curl https://raw.githubusercontent.com/dbolotin/awsq/master/install 2> /dev/null | sh
+
+curl https://raw.githubusercontent.com/dbolotin/awsq/master/awsq | sudo tee /usr/local/bin/awsq > /dev/null
+sudo chmod +x /usr/local/bin/awsq
