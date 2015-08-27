@@ -48,7 +48,6 @@ do
         ;;
         --shutdown-after-work)
             shutdown=true
-            shift
         ;;
         --emptyTimeout)
             emptyQueueTimeout=${1}
