@@ -255,12 +255,16 @@ case $cmd in
             aws s3 cp ${taskFile} ${fileName}
         elif [[ "${taskFile}" == "http://"* ]] || [[ "${taskFile}" == "https://"* ]]; then
             curl ${taskFile} > ${fileName}
-            chmod +x ${fileName}
         fi
 
         if [[ ${fileName} == *".zip" ]]; then
             unzip ${fileName}
             rm ${fileName}
+        fi
+
+        if [[ "${cmd}" == "./"* ]];
+        then
+            chmod +x ${cmd}
         fi
 
         $cmd ${args[@]}
