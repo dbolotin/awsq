@@ -25,6 +25,7 @@ type aws >/dev/null 2>&1 || { echo >&2 "Please install \"aws cli\". Try \"pip in
 
 queue=''
 shutdown=false
+completeOnError=false
 region='us-east-1'
 emptyQueueTimeout=10
 
@@ -47,6 +48,9 @@ do
             shift
         ;;
         --shutdown-after-work)
+            shutdown=true
+        ;;
+        --complete-on-error)
             shutdown=true
         ;;
         --emptyTimeout)
@@ -226,10 +230,15 @@ case $cmd in
                     if wait $pid
                     then
                         echo "Process complete successfully. Deleting item from queue."
+                        aws sqs delete-message --region ${region} --queue-url ${queueURL} --receipt-handle "${receiptHandle}"
                     else
                         echo "Process complete with error."
+                        if [[ ${completeOnError} == true ]]
+                        then
+                            aws sqs delete-message --region ${region} --queue-url ${queueURL} --receipt-handle "${receiptHandle}"
+                        fi
                     fi
-                    aws sqs delete-message --region ${region} --queue-url ${queueURL} --receipt-handle "${receiptHandle}"
+                    
                     break
                 fi
             done
