@@ -5,21 +5,33 @@ import os
 import argparse
 from argparse import ArgumentError
 
+import errno
+import string
+import random
+import fcntl
+import select
 import shlex
+import shutil
 import boto3
 import itertools
 import hashlib
 import cPickle as pickle
 import io
 import zlib
+from threading import Thread
 
 # importing subprocess or backport in python 2.x
 from botocore.exceptions import ClientError
 
-if os.name == 'posix' and sys.version_info[0] < 3:
-    import subprocess32 as subprocess
-else:
-    import subprocess as sp
+try:
+    from Queue import Queue, Empty
+except ImportError:
+    from queue import Queue, Empty  # python 3.x
+
+# if os.name == 'posix' and sys.version_info[0] < 3:
+#     import subprocess32 as subprocess
+# else:
+import subprocess
 
 
 class Cmd:
@@ -47,7 +59,120 @@ class File:
         return "File{ %s, size=%s }" % (self.file_name, len(self.content))
 
 
-#
+class ExecutionEnvironment:
+    def __init__(self, shared_folder, working_folder):
+        self.shared_folder = shared_folder
+        self.working_folder = working_folder
+
+
+def atomic_only_file(filename):
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+
+    try:
+        file_handle = os.open(filename, flags)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            return False
+        else:  # Something unexpected went wrong so reraise the exception.
+            raise
+    else:  # No exception, so the file must have been created successfully.
+        with os.fdopen(file_handle, 'w') as file_obj:
+            file_obj.write("Lock")
+        return True
+
+
+def random_folder_name(size=32, chars=string.ascii_uppercase + string.digits + string.ascii_lowercase):
+    return ''.join(random.choice(chars) for _ in range(size))
+
+
+def touch_open(filename, *args, **kwargs):
+    # Open the file in R/W and create if it doesn't exist. *Don't* pass O_TRUNC
+    fd = os.open(filename, os.O_RDWR | os.O_CREAT)
+
+    # Encapsulate the low-level file descriptor in a python file object
+    return os.fdopen(fd, *args, **kwargs)
+
+
+ON_POSIX = 'posix' in sys.builtin_module_names
+
+
+class Job:
+    def __init__(self, variables, commands, log_group=None, log_stream=None):
+        self.variables = variables
+        self.commands = commands
+        self.log_group = log_group
+        self.log_stream = log_stream
+
+    def catch_output(self, stream, is_err):
+        for line in iter(stream.readline, b''):
+            if is_err:
+                print("ERR: " + line)
+            else:
+                print("OUT: " + line)
+        stream.close()
+
+    def execute_cmd(self, cmd, working_folder, env):
+        proc = subprocess.Popen(cmd.cmd, cwd=working_folder, env=env,
+                                shell=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                close_fds=ON_POSIX)
+        t_out = Thread(target=self.catch_output, args=(proc.stdout, False))
+        t_out.start()
+        t_err = Thread(target=self.catch_output, args=(proc.stderr, True))
+        t_err.start()
+        t_out.join()
+        t_err.join()
+
+        return proc.returncode == 0
+
+    def execute(self, environment):
+        # Generate folder name
+        folder = os.path.join(environment.working_folder, random_folder_name())
+
+        # Check that if folder not exists
+        assert not os.path.exists(folder)
+
+        # Creating folder
+        os.makedirs(folder)
+
+        # Creating evn (environment variables objects)
+        env = os.environ.copy()
+        env["AWSQ_SHARED_FOLDER"] = environment.shared_folder
+        for var, value in self.variables.iteritems():
+            if not isinstance(value, str):
+                value = str(value)
+            env[var] = value
+
+        # Executing commands
+        for step in self.commands:
+            # File
+            if isinstance(step, File):
+                with open(os.path.join(folder, step.file_name), 'w') as f:
+                    f.write(step.content)
+
+            # Cmd
+            elif isinstance(step, Cmd):
+                if not step.once_tag:
+                    self.execute_cmd(step, folder, env)
+                else:
+                    lock_file = os.path.join(environment.shared_folder, step.once_tag + ".lock")
+                    # Open an existing file or create if it doesn't exist
+                    with touch_open(lock_file, "r+") as fd:
+                        # Acquire a exclusive lock
+                        fcntl.lockf(fd, fcntl.LOCK_EX)
+
+                        # Read a previous value if present
+                        previous_value = fd.read()
+                        if previous_value != "Done":
+                            if self.execute(step, folder, env):
+                                # Write the new value and truncate
+                                fd.seek(0)
+                                fd.write("Done")
+                                fd.truncate()
+
+        shutil.rmtree(folder)
+
+
 # Arguments parser
 #
 
@@ -311,9 +436,12 @@ args = main_parser.parse_args(namespace=QNamespace())
 
 # args = parser.parse_args("--execute gg.sh --cmd sd --once --cmd gogo --cmd sd --once asdf --cmd gogo".split(),
 #                          namespace=QNamespace())
-
 for c in args.commands:
     print(c)
 
+e = ExecutionEnvironment('.', '.')
+
 for c in args.variables_generator:
-    print(c)
+    job = Job(c, args.commands)
+    job.execute(e)
+    break
