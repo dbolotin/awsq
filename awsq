@@ -88,6 +88,10 @@ class ExecutionEnvironment:
             logger.addHandler(self.wt_handler)
         return logger
 
+    def __repr__(self):
+        items = ("%s = %r" % (k, v) for k, v in self.__dict__.items())
+        return "<%s: {%s}>" % (self.__class__.__name__, ', '.join(items))
+
 
 def atomic_only_file(filename):
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
@@ -129,30 +133,29 @@ class CmdExecutor:
         self.proc = None
         self.environment = environment
         self.logger = logger
-        self.mutex = Lock()
-        self.output_buffer = []
+        # self.mutex = Lock()
+        # self.output_buffer = []
 
     def catch_output(self, stream, is_err):
         for line in iter(stream.readline, b''):
-            with self.mutex:
-                if is_err:
-                    self.output_buffer.append("ERR: " + line[:-1])
-                else:
-                    self.output_buffer.append("OUT: " + line[:-1])
+            if is_err:
+                self.logger.info("ERR: " + line[:-1])
+            else:
+                self.logger.info("OUT: " + line[:-1])
         stream.close()
 
-    def process_output(self):
-        with self.mutex:
-            buf = list(self.output_buffer)
-            self.output_buffer = []
-        while self.proc.returncode is None or len(buf) > 0:
-            for line in buf:
-                self.logger.info(line)
-            time.sleep(2)
-            with self.mutex:
-                buf = list(self.output_buffer)
-                self.output_buffer = []
-        self.logger.info("Finished processing output.")
+    # def process_output(self):
+    #     with self.mutex:
+    #         buf = list(self.output_buffer)
+    #         self.output_buffer = []
+    #     while self.proc.returncode is None or len(buf) > 0:
+    #         for line in buf:
+    #             self.logger.info(line)
+    #         time.sleep(2)
+    #         with self.mutex:
+    #             buf = list(self.output_buffer)
+    #             self.output_buffer = []
+    #     self.logger.info("Finished processing output.")
 
     def execute(self):
         self.logger.info("Executing.")
@@ -164,8 +167,8 @@ class CmdExecutor:
         t_out.start()
         t_err = Thread(target=self.catch_output, args=(self.proc.stderr, True))
         t_err.start()
-        t_process = Thread(target=self.process_output, args=())
-        t_process.start()
+        # t_process = Thread(target=self.process_output, args=())
+        # t_process.start()
 
         self.proc.wait()
 
@@ -209,8 +212,11 @@ class Job:
                     value = str(value)
                 env[var] = value
 
+            logger.info("Variables: %s", self.variables)
+
             # Executing commands
             for step in self.commands:
+                logger.info("Executing: %s.", step)
                 # File
                 if isinstance(step, File):
                     logger.info("Writing file.")
@@ -304,7 +310,7 @@ class QNamespace:
         self.shared_dir = '.'
         self.working_dir = '.'
         self.commands = []
-        self.variables_generator = []
+        self.variables_generator = [{}]
         self.idle_time = None
         self.subcommand = None
         self.log_group = None
@@ -383,6 +389,9 @@ def variable_generator(dict):
 
 class VariableParserAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
+        if not values:
+            return
+
         generators = []
 
         variables = {}
@@ -430,7 +439,7 @@ class FileParserAction(argparse.Action):
 class ExecuteParserAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         namespace.add_file(values)
-        namespace.add_cmd("chmod +x " + values)
+        namespace.add_cmd("chmod +x " + values, ignore_once=True)
         namespace.add_cmd("./" + values)
 
 
@@ -535,6 +544,7 @@ if args.subcommand == "submit":
                 print("Error")
                 print(result)
                 exit(1)
+            common_logger.info("Submitted %s.", len(batch))
             batch = []
 
     if len(batch) > 0:
@@ -543,9 +553,11 @@ if args.subcommand == "submit":
             print("Error")
             print(result)
             exit(1)
+        common_logger.info("Submitted %s.", len(batch))
 
 elif args.subcommand == "execute":
     e = args.get_execution_environment(boto_session)
+    common_logger.info("Execution environment: %s.", e)
     last_good_msg = int(round(time.time() * 1000))
     common_logger.info("Starting polling for messages.")
     while True:
@@ -567,7 +579,6 @@ elif args.subcommand == "execute":
                     QueueUrl=queue_url,
                     ReceiptHandle=receipt_handle
                 )
-                # print(resp)
             keeper.running = False
 
         if args.idle_time is not None and current_time - last_good_msg > args.idle_time * 1000:
